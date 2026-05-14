@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreamBot Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a24;
+    --border: #2a2a3a;
+    --accent: #a855f7;
+    --accent2: #7c3aed;
+    --live: #ef4444;
+    --live-glow: rgba(239,68,68,0.3);
+    --green: #22c55e;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ---- HEADER ---- */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    background: rgba(10,10,15,0.95);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .logo-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .user-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 12px 4px 4px;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .user-chip img {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--border);
+  }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: all 0.15s;
+    letter-spacing: 0.05em;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-accent {
+    background: var(--accent2);
+    border-color: var(--accent);
+    color: white;
+  }
+  .btn-accent:hover { background: var(--accent); }
+
+  /* ---- LAYOUT ---- */
+  .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+
+  /* ---- SECTIONS ---- */
+  #login-screen, #app-screen { display: none; }
+  #login-screen.visible, #app-screen.visible { display: block; }
+
+  /* Login */
+  .login-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 56px);
+    gap: 1.5rem;
+    text-align: center;
+  }
+  .login-title {
+    font-family: var(--mono);
+    font-size: 2rem;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .login-title span { color: var(--accent); }
+  .login-sub { color: var(--muted); font-size: 0.9rem; max-width: 360px; line-height: 1.6; }
+
+  /* ---- STREAMERS LIST ---- */
+  .section-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  .streamers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .streamer-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .streamer-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+  .streamer-card.active {
+    border-color: var(--accent);
+    background: var(--surface2);
+  }
+  .streamer-card.live {
+    border-color: var(--live);
+  }
+  .streamer-card.live::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .streamer-name {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--text);
+    margin-bottom: 0.25rem;
+  }
+  .streamer-meta {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--live);
+    color: white;
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.4rem;
+  }
+  .live-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: white;
+    animation: pulse 1s infinite;
+  }
+
+  /* ---- STATS PANELS ---- */
+  #stats-panel { animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .stats-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .stats-title {
+    font-family: var(--mono);
+    font-size: 1.4rem;
+    color: var(--text);
+  }
+  .stats-title a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .stats-title a:hover { text-decoration: underline; }
+
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 2rem;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .kpi-label {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  .kpi-value {
+    font-family: var(--mono);
+    font-size: 1.5rem;
+    color: var(--text);
+    line-height: 1;
+  }
+  .kpi-value.accent { color: var(--accent); }
+  .kpi-value.live-color { color: var(--live); }
+
+  /* ---- CHARTS ---- */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  @media (max-width: 700px) {
+    .charts-grid { grid-template-columns: 1fr; }
+    .streamers-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  }
+
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+  }
+  .chart-title {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  /* Bar chart */
+  .bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 80px; }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+  .bar {
+    width: 100%;
+    background: var(--accent2);
+    border-radius: 3px 3px 0 0;
+    min-height: 2px;
+    transition: height 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: relative;
+  }
+  .bar:hover { background: var(--accent); }
+  .bar-label { font-family: var(--mono); font-size: 0.55rem; color: var(--muted); }
+  .bar-val { font-family: var(--mono); font-size: 0.55rem; color: var(--accent); }
+
+  /* Hour heatmap */
+  .hour-grid {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
+  }
+  .hour-cell {
+    height: 28px;
+    border-radius: 2px;
+    background: var(--surface2);
+    transition: background 0.3s;
+    position: relative;
+  }
+  .hour-cell:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .hour-labels {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
+    margin-top: 3px;
+  }
+  .hour-lbl { font-family: var(--mono); font-size: 0.45rem; color: var(--muted); text-align: center; }
+
+  /* Games list */
+  .game-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .game-name {
+    font-size: 0.8rem;
+    color: var(--text);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .game-bar-bg {
+    flex: 2;
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .game-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .game-count {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    min-width: 24px;
+    text-align: right;
+  }
+
+  /* Monthly trend */
+  .monthly-chart { display: flex; align-items: flex-end; gap: 6px; height: 70px; }
+  .month-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; }
+  .month-bar {
+    width: 100%;
+    background: linear-gradient(180deg, var(--accent), var(--accent2));
+    border-radius: 3px 3px 0 0;
+    min-height: 2px;
+  }
+  .month-label { font-family: var(--mono); font-size: 0.55rem; color: var(--muted); }
+
+  /* Recent sessions */
+  .sessions-table { width: 100%; border-collapse: collapse; }
+  .sessions-table th {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0 0.75rem 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .sessions-table td {
+    font-size: 0.78rem;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid rgba(42,42,58,0.5);
+    color: var(--text);
+    vertical-align: top;
+  }
+  .sessions-table tr:last-child td { border-bottom: none; }
+  .sessions-table tr:hover td { background: rgba(168,85,247,0.04); }
+  .session-title {
+    font-size: 0.75rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+  }
+  .tag {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    padding: 1px 5px;
+    color: var(--muted);
+  }
+
+  /* loading / empty states */
+  .loading {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    padding: 2rem 0;
+    text-align: center;
+    letter-spacing: 0.1em;
+  }
+  .loading::after {
+    content: '';
+    animation: dots 1.5s steps(3, end) infinite;
+  }
+  @keyframes dots {
+    0% { content: ''; }
+    33% { content: '.'; }
+    66% { content: '..'; }
+    100% { content: '...'; }
+  }
+
+  .full-chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  /* error */
+  .error-msg {
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: #fca5a5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    STREAMBOT / DASH
+  </div>
+  <div class="header-right" id="header-user-area">
+    <a href="/auth/login" class="btn btn-accent" id="login-btn">LOGIN WITH DISCORD</a>
+  </div>
+</header>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div class="login-center">
+    <div class="login-title">STREAM<span>STATS</span></div>
+    <p class="login-sub">
+      Log in with Discord to view stream history, game stats, and activity patterns for your linked Twitch account.
+    </p>
+    <a href="/auth/login" class="btn btn-accent">LOGIN WITH DISCORD</a>
+  </div>
+</div>
+
+<!-- APP SCREEN -->
+<div id="app-screen">
+  <div class="container">
+
+    <div class="section-label">STREAMERS</div>
+    <div class="streamers-grid" id="streamers-grid">
+      <div class="loading">loading</div>
+    </div>
+
+    <div id="stats-panel" style="display:none">
+      <div class="stats-header">
+        <div class="stats-title">
+          <a id="twitch-link" href="#" target="_blank">@<span id="stats-username"></span></a>
+        </div>
+        <div id="live-indicator"></div>
+      </div>
+
+      <div class="kpi-row" id="kpi-row"></div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-title">STREAMS BY DAY OF WEEK</div>
+          <div class="bar-chart" id="day-chart"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">TOP GAMES</div>
+          <div id="games-list"></div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-title">ACTIVITY BY HOUR (LOCAL TIME)</div>
+          <div class="hour-grid" id="hour-grid"></div>
+          <div class="hour-labels" id="hour-labels"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">STREAMS PER MONTH</div>
+          <div class="monthly-chart" id="monthly-chart"></div>
+        </div>
+      </div>
+
+      <div class="full-chart-card">
+        <div class="chart-title">RECENT SESSIONS</div>
+        <div id="sessions-wrap"></div>
+      </div>
+    </div>
+
+    <div id="no-stats-msg" style="display:none" class="loading">
+      No stream history yet — history will be recorded from next stream
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ---- State ----
+let currentUser = null;
+let selectedStreamer = null;
+
+// ---- Init ----
+async function init() {
+  const res = await fetch("/api/me");
+  const data = await res.json();
+
+  if (!data.authenticated) {
+    document.getElementById("login-screen").classList.add("visible");
+    return;
+  }
+
+  currentUser = data.user;
+
+  // Update header
+  const avatar = currentUser.avatar
+    ? `https://cdn.discordapp.com/avatars/${currentUser.discordId}/${currentUser.avatar}.png`
+    : `https://cdn.discordapp.com/embed/avatars/0.png`;
+
+  document.getElementById("header-user-area").innerHTML = `
+    <div class="user-chip">
+      <img src="${avatar}" alt="avatar">
+      <span>${currentUser.username}</span>
+    </div>
+    <a href="/auth/logout" class="btn">LOGOUT</a>
+  `;
+
+  document.getElementById("app-screen").classList.add("visible");
+  loadStreamers();
+}
+
+// ---- Load streamers ----
+async function loadStreamers() {
+  const res = await fetch("/api/streamers");
+  const streamers = await res.json();
+
+  const grid = document.getElementById("streamers-grid");
+  if (!streamers.length) {
+    grid.innerHTML = `<div class="loading">no streamers linked yet</div>`;
+    return;
+  }
+
+  grid.innerHTML = streamers.map(s => `
+    <div class="streamer-card${s.liveNow ? ' live' : ''}" onclick="loadStats('${s.twitch}', this)">
+      ${s.liveNow ? `<div class="live-badge"><div class="live-dot"></div>LIVE</div>` : ''}
+      <div class="streamer-name">${s.twitch}</div>
+      <div class="streamer-meta">${s.totalSessions} sessions${s.lastStream ? '<br>' + timeAgo(s.lastStream) : ''}</div>
+    </div>
+  `).join('');
+
+  // Auto-select own account if linked
+  if (currentUser.twitchLogin) {
+    const myCard = [...grid.querySelectorAll('.streamer-card')]
+      .find(el => el.querySelector('.streamer-name')?.textContent === currentUser.twitchLogin);
+    if (myCard) myCard.click();
+  }
+}
+
+// ---- Load stats for a streamer ----
+async function loadStats(twitchLogin, cardEl) {
+  selectedStreamer = twitchLogin;
+
+  // Update active card
+  document.querySelectorAll('.streamer-card').forEach(c => c.classList.remove('active'));
+  if (cardEl) cardEl.classList.add('active');
+
+  document.getElementById("stats-panel").style.display = "none";
+  document.getElementById("no-stats-msg").style.display = "none";
+
+  const res = await fetch(`/api/stats/${twitchLogin}`);
+  if (!res.ok) return;
+  const stats = await res.json();
+
+  document.getElementById("stats-username").textContent = twitchLogin;
+  document.getElementById("twitch-link").href = `https://twitch.tv/${twitchLogin}`;
+
+  // Live indicator
+  document.getElementById("live-indicator").innerHTML = stats.liveNow
+    ? `<div class="live-badge" style="font-size:0.75rem;padding:4px 10px"><div class="live-dot"></div>LIVE NOW</div>`
+    : '';
+
+  if (stats.totalStreams === 0) {
+    document.getElementById("no-stats-msg").style.display = "block";
+    document.getElementById("stats-panel").style.display = "block";
+    renderKPIs(stats);
+    return;
+  }
+
+  document.getElementById("stats-panel").style.display = "block";
+  renderKPIs(stats);
+  renderDayChart(stats.streamsByDay);
+  renderGames(stats.topGames);
+  renderHourHeatmap(stats.streamsByHour);
+  renderMonthly(stats.monthly);
+  renderSessions(stats.recentSessions);
+}
+
+// ---- KPIs ----
+function renderKPIs(stats) {
+  const kpis = [
+    { label: "TOTAL STREAMS", value: stats.totalStreams, cls: "" },
+    { label: "AVG DURATION", value: stats.avgDuration ? `${stats.avgDuration}m` : "—", cls: "" },
+    { label: "TOTAL HOURS", value: stats.totalMinutes ? `${Math.round(stats.totalMinutes / 60)}h` : "—", cls: "accent" },
+    { label: "PEAK VIEWERS", value: stats.peakViewers || "—", cls: "" },
+    { label: "AVG VIEWERS", value: stats.avgViewers || "—", cls: "" },
+  ];
+  document.getElementById("kpi-row").innerHTML = kpis.map(k => `
+    <div class="kpi">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value ${k.cls}">${k.value}</div>
+    </div>
+  `).join('');
+}
+
+// ---- Day chart ----
+function renderDayChart(days) {
+  const max = Math.max(...days.map(d => d.count), 1);
+  document.getElementById("day-chart").innerHTML = days.map(d => `
+    <div class="bar-wrap">
+      <div class="bar-val">${d.count || ''}</div>
+      <div class="bar" style="height:${Math.round((d.count / max) * 100)}%" title="${d.day}: ${d.count}"></div>
+      <div class="bar-label">${d.day}</div>
+    </div>
+  `).join('');
+}
+
+// ---- Games ----
+function renderGames(games) {
+  if (!games.length) {
+    document.getElementById("games-list").innerHTML = `<div class="loading">no data</div>`;
+    return;
+  }
+  const max = Math.max(...games.map(g => g.count), 1);
+  document.getElementById("games-list").innerHTML = games.map(g => `
+    <div class="game-row">
+      <div class="game-name" title="${g.game}">${g.game}</div>
+      <div class="game-bar-bg">
+        <div class="game-bar-fill" style="width:${Math.round((g.count / max) * 100)}%"></div>
+      </div>
+      <div class="game-count">${g.count}</div>
+    </div>
+  `).join('');
+}
+
+// ---- Hour heatmap ----
+function renderHourHeatmap(hours) {
+  const max = Math.max(...hours.map(h => h.count), 1);
+  const grid = document.getElementById("hour-grid");
+  const labels = document.getElementById("hour-labels");
+
+  grid.innerHTML = hours.map(h => {
+    const intensity = h.count / max;
+    const bg = h.count === 0
+      ? 'var(--surface2)'
+      : `rgba(168,85,247,${0.15 + intensity * 0.85})`;
+    const hLabel = h.hour === 0 ? '12a' : h.hour < 12 ? `${h.hour}a` : h.hour === 12 ? '12p' : `${h.hour - 12}p`;
+    return `<div class="hour-cell" style="background:${bg}" data-tip="${hLabel}: ${h.count} streams"></div>`;
+  }).join('');
+
+  labels.innerHTML = hours.map((h, i) => {
+    const show = i % 6 === 0;
+    const lbl = h.hour === 0 ? '12a' : h.hour === 12 ? '12p' : h.hour < 12 ? `${h.hour}a` : `${h.hour - 12}p`;
+    return `<div class="hour-lbl">${show ? lbl : ''}</div>`;
+  }).join('');
+}
+
+// ---- Monthly ----
+function renderMonthly(monthly) {
+  const max = Math.max(...monthly.map(m => m.count), 1);
+  document.getElementById("monthly-chart").innerHTML = monthly.map(m => `
+    <div class="month-bar-wrap">
+      <div class="month-bar" style="height:${Math.round((m.count / max) * 100)}%" title="${m.label}: ${m.count}"></div>
+      <div class="month-label">${m.label}</div>
+    </div>
+  `).join('');
+}
+
+// ---- Sessions table ----
+function renderSessions(sessions) {
+  if (!sessions.length) {
+    document.getElementById("sessions-wrap").innerHTML = `<div class="loading">no sessions recorded</div>`;
+    return;
+  }
+  document.getElementById("sessions-wrap").innerHTML = `
+    <div style="overflow-x:auto">
+    <table class="sessions-table">
+      <thead>
+        <tr>
+          <th>DATE</th>
+          <th>TITLE</th>
+          <th>GAME</th>
+          <th>DURATION</th>
+          <th>PEAK</th>
+          <th>AVG</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${sessions.map(s => `
+          <tr>
+            <td style="font-family:var(--mono);font-size:0.7rem;white-space:nowrap;color:var(--muted)">
+              ${formatDate(s.startedAt)}
+            </td>
+            <td>
+              <div class="session-title">${escHtml(s.title || '—')}</div>
+            </td>
+            <td><span class="tag">${escHtml(s.game || '—')}</span></td>
+            <td style="font-family:var(--mono);font-size:0.7rem;color:var(--muted)">
+              ${s.durationMinutes ? s.durationMinutes + 'm' : s.endedAt ? '—' : '<span style="color:var(--live)">LIVE</span>'}
+            </td>
+            <td style="font-family:var(--mono);font-size:0.72rem">${s.peakViewers ?? '—'}</td>
+            <td style="font-family:var(--mono);font-size:0.72rem;color:var(--muted)">${s.avgViewers ?? '—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    </div>
+  `;
+}
+
+// ---- Helpers ----
+function timeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const d = Math.floor(diff / 86400000);
+  if (d === 0) return 'today';
+  if (d === 1) return 'yesterday';
+  if (d < 7) return `${d}d ago`;
+  if (d < 30) return `${Math.floor(d / 7)}w ago`;
+  return `${Math.floor(d / 30)}mo ago`;
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+init();
+</script>
+</body>
+</html>
