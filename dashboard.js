@@ -13,30 +13,65 @@ const DATA_FILE = path.join(__dirname, "./data.json");
 
 function loadData() {
   try {
-    if (!fs.existsSync(DATA_FILE)) return { guilds: {}, users: {}, history: {} };
+    if (!fs.existsSync(DATA_FILE)) return { guilds: {}, users: {}, history: {}, admins: {} };
     const raw = fs.readFileSync(DATA_FILE, "utf8");
-    if (!raw) return { guilds: {}, users: {}, history: {} };
+    if (!raw) return { guilds: {}, users: {}, history: {}, admins: {} };
     const parsed = JSON.parse(raw);
     return {
       guilds: parsed.guilds || {},
       users: parsed.users || {},
-      history: parsed.history || {}
+      history: parsed.history || {},
+      admins: parsed.admins || {}
     };
   } catch {
-    return { guilds: {}, users: {}, history: {} };
+    return { guilds: {}, users: {}, history: {}, admins: {} };
   }
 }
 
-// -------------------- ADMIN LIST --------------------
-
-// Comma-separated Discord user IDs in .env: ADMIN_IDS=123456789,987654321
-function getAdminIds() {
-  const raw = process.env.ADMIN_IDS || "";
-  return new Set(raw.split(",").map(s => s.trim()).filter(Boolean));
+function saveData(data) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
+// -------------------- ADMIN LIST --------------------
+// Bootstrap admin comes from ADMIN_IDS in .env (your ID).
+// After that, admins are stored in data.json and manageable via the dashboard.
+
 function isAdmin(discordId) {
-  return getAdminIds().has(discordId);
+  // Always honour the .env bootstrap owner
+  const envIds = (process.env.ADMIN_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (envIds.includes(discordId)) return true;
+  // Check data.json admins
+  const data = loadData();
+  return !!data.admins[discordId];
+}
+
+function addAdmin(discordId, addedByDiscordId, username) {
+  const data = loadData();
+  data.admins[discordId] = { addedBy: addedByDiscordId, username, addedAt: new Date().toISOString() };
+  saveData(data);
+}
+
+function removeAdmin(discordId) {
+  const data = loadData();
+  delete data.admins[discordId];
+  saveData(data);
+}
+
+function listAdmins() {
+  const data = loadData();
+  const envIds = (process.env.ADMIN_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+  const result = [];
+  // Bootstrap owner(s) from env
+  for (const id of envIds) {
+    result.push({ discordId: id, username: data.admins[id]?.username || "owner", isOwner: true });
+  }
+  // data.json admins
+  for (const [id, meta] of Object.entries(data.admins)) {
+    if (!envIds.includes(id)) {
+      result.push({ discordId: id, username: meta.username, addedBy: meta.addedBy, addedAt: meta.addedAt, isOwner: false });
+    }
+  }
+  return result;
 }
 
 // -------------------- SESSION --------------------
@@ -188,6 +223,53 @@ app.get("/api/streamers", requireAdmin, (req, res) => {
     };
   });
   res.json(streamers);
+});
+
+// List all admins
+app.get("/api/admins", requireAdmin, (req, res) => {
+  res.json(listAdmins());
+});
+
+// Add an admin — owner only (must be in ADMIN_IDS env)
+app.post("/api/admins", requireAdmin, express.json(), async (req, res) => {
+  const envIds = (process.env.ADMIN_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!envIds.includes(req.session.user.discordId)) {
+    return res.status(403).json({ error: "Only the owner can add admins" });
+  }
+
+  const { discordId } = req.body;
+  if (!discordId || !/^\d{17,20}$/.test(discordId)) {
+    return res.status(400).json({ error: "Invalid Discord ID — must be a 17-20 digit number" });
+  }
+
+  if (isAdmin(discordId)) {
+    return res.status(409).json({ error: "Already an admin" });
+  }
+
+  // Try to fetch their Discord username for display
+  let username = discordId;
+  try {
+    const r = await axios.get(`https://discord.com/api/users/${discordId}`, {
+      headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` }
+    });
+    username = r.data.global_name || r.data.username || discordId;
+  } catch { /* fall back to raw ID */ }
+
+  addAdmin(discordId, req.session.user.discordId, username);
+  res.json({ ok: true, discordId, username });
+});
+
+// Remove an admin — owner only
+app.delete("/api/admins/:discordId", requireAdmin, (req, res) => {
+  const envIds = (process.env.ADMIN_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!envIds.includes(req.session.user.discordId)) {
+    return res.status(403).json({ error: "Only the owner can remove admins" });
+  }
+  if (envIds.includes(req.params.discordId)) {
+    return res.status(400).json({ error: "Cannot remove the owner" });
+  }
+  removeAdmin(req.params.discordId);
+  res.json({ ok: true });
 });
 
 // -------------------- STATS BUILDER --------------------

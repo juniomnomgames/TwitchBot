@@ -488,6 +488,110 @@
     font-size: 0.75rem;
     color: #fca5a5;
   }
+
+  /* admin panel */
+  #admin-screen { display: none; }
+  #admin-screen.visible { display: block; }
+
+  .admin-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 560px;
+    margin-bottom: 1.5rem;
+  }
+  .admin-card h2 {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+  .admin-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid rgba(42,42,58,0.5);
+    gap: 1rem;
+  }
+  .admin-row:last-child { border-bottom: none; }
+  .admin-name { font-size: 0.85rem; color: var(--text); }
+  .admin-id { font-family: var(--mono); font-size: 0.65rem; color: var(--muted); }
+  .owner-tag {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    background: rgba(168,85,247,0.15);
+    border: 1px solid rgba(168,85,247,0.3);
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .btn-danger {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(239,68,68,0.4);
+    background: transparent;
+    color: #fca5a5;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-danger:hover { background: rgba(239,68,68,0.1); border-color: var(--live); }
+
+  .add-admin-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .input-field {
+    flex: 1;
+    min-width: 200px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 6px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .input-field:focus { border-color: var(--accent); }
+  .input-field::placeholder { color: var(--muted); }
+  .nav-btn {
+    background: none;
+    border: none;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    transition: color 0.15s;
+  }
+  .nav-btn:hover, .nav-btn.active { color: var(--accent); }
+  .toast {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    padding: 0.6rem 1rem;
+    color: var(--text);
+    z-index: 9000;
+    animation: slideUp 0.2s ease;
+    pointer-events: none;
+  }
+  @keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 </style>
 </head>
 <body>
@@ -517,10 +621,18 @@
 <div id="app-screen">
   <div class="container">
 
-    <div class="section-label">STREAMERS</div>
-    <div class="streamers-grid" id="streamers-grid">
-      <div class="loading">loading</div>
+    <!-- NAV TABS (owner only sees Settings) -->
+    <div style="display:flex;gap:0.25rem;margin-bottom:1.5rem" id="nav-tabs">
+      <button class="nav-btn active" onclick="showTab('stats')">STATS</button>
+      <button class="nav-btn" id="admin-tab-btn" onclick="showTab('admin')" style="display:none">SETTINGS</button>
     </div>
+
+    <!-- STATS TAB -->
+    <div id="stats-tab">
+      <div class="section-label">STREAMERS</div>
+      <div class="streamers-grid" id="streamers-grid">
+        <div class="loading">loading</div>
+      </div>
 
     <div id="stats-panel" style="display:none">
       <div class="stats-header">
@@ -565,13 +677,33 @@
       No stream history yet — history will be recorded from next stream
     </div>
 
+    </div> <!-- end #stats-tab -->
+
+    <!-- ADMIN PANEL TAB -->
+    <div id="admin-tab" style="display:none">
+      <div class="admin-card">
+        <h2>DASHBOARD ADMINS</h2>
+        <div id="admins-list"><div class="loading">loading</div></div>
+        <div class="add-admin-form" id="add-admin-form" style="display:none">
+          <input class="input-field" id="new-admin-id" placeholder="Discord User ID (e.g. 123456789012345678)" maxlength="20">
+          <button class="btn btn-accent" onclick="addAdmin()">ADD</button>
+        </div>
+        <p style="font-size:0.72rem;color:var(--muted);margin-top:0.75rem;line-height:1.5">
+          To get someone's Discord ID: they need Developer Mode on (Settings → Advanced), then right-click their name → Copy User ID.
+        </p>
+      </div>
+    </div>
+
   </div>
 </div>
+
+<div id="toast" class="toast" style="display:none"></div>
 
 <script>
 // ---- State ----
 let currentUser = null;
 let selectedStreamer = null;
+let isOwner = false;
 
 // ---- Init ----
 async function init() {
@@ -599,7 +731,85 @@ async function init() {
   `;
 
   document.getElementById("app-screen").classList.add("visible");
+
+  // Check if owner (can manage admins)
+  const admins = await fetch("/api/admins").then(r => r.json());
+  const me = admins.find(a => a.discordId === currentUser.discordId);
+  isOwner = me?.isOwner || false;
+  if (isOwner) {
+    document.getElementById("admin-tab-btn").style.display = "inline-block";
+  }
+
   loadStreamers();
+}
+
+// ---- Tab switching ----
+function showTab(tab) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('stats-tab').style.display = tab === 'stats' ? 'block' : 'none';
+  document.getElementById('admin-tab').style.display = tab === 'admin' ? 'block' : 'none';
+  const btn = tab === 'stats'
+    ? document.querySelector('.nav-btn[onclick="showTab(\'stats\')"]')
+    : document.getElementById('admin-tab-btn');
+  if (btn) btn.classList.add('active');
+  if (tab === 'admin') loadAdmins();
+}
+
+// ---- Toast ----
+function toast(msg, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.borderColor = isError ? 'rgba(239,68,68,0.4)' : 'var(--border)';
+  el.style.color = isError ? '#fca5a5' : 'var(--text)';
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+// ---- Load admins ----
+async function loadAdmins() {
+  const admins = await fetch("/api/admins").then(r => r.json());
+  const list = document.getElementById("admins-list");
+  list.innerHTML = admins.map(a => `
+    <div class="admin-row">
+      <div>
+        <div class="admin-name">${escHtml(a.username)} ${a.isOwner ? '<span class="owner-tag">OWNER</span>' : ''}</div>
+        <div class="admin-id">${a.discordId}</div>
+      </div>
+      ${!a.isOwner && isOwner ? `<button class="btn-danger" onclick="removeAdmin('${a.discordId}', this)">REMOVE</button>` : ''}
+    </div>
+  `).join('') || '<div class="loading">no admins</div>';
+
+  if (isOwner) document.getElementById("add-admin-form").style.display = "flex";
+}
+
+// ---- Add admin ----
+async function addAdmin() {
+  const input = document.getElementById("new-admin-id");
+  const discordId = input.value.trim();
+  if (!discordId) return;
+
+  const res = await fetch("/api/admins", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ discordId })
+  });
+  const data = await res.json();
+
+  if (!res.ok) { toast(data.error, true); return; }
+
+  toast(`Added ${data.username}`, false);
+  input.value = "";
+  loadAdmins();
+}
+
+// ---- Remove admin ----
+async function removeAdmin(discordId, btn) {
+  btn.disabled = true;
+  const res = await fetch(`/api/admins/${discordId}`, { method: "DELETE" });
+  const data = await res.json();
+  if (!res.ok) { toast(data.error, true); btn.disabled = false; return; }
+  toast("Removed", false);
+  loadAdmins();
 }
 
 // ---- Load streamers ----
