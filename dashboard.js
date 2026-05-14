@@ -75,7 +75,7 @@ function listAdmins() {
 }
 
 // -------------------- SESSION --------------------
-
+app.set('trust proxy', 1);
 app.use(session({
   secret: process.env.SESSION_SECRET || "changeme-use-a-random-string",
   resave: false,
