@@ -1,5 +1,4 @@
 require("dotenv").config();
-
 const fs = require("fs");
 const {
   Client,
@@ -9,7 +8,6 @@ const {
   Routes,
   REST
 } = require("discord.js");
-
 const axios = require("axios");
 
 const client = new Client({
@@ -23,35 +21,21 @@ const DATA_FILE = "./data.json";
 function loadData() {
   try {
     if (!fs.existsSync(DATA_FILE)) {
-      return {
-        guilds: {},
-        users: {}
-      };
+      return { guilds: {}, users: {} };
     }
 
     const raw = fs.readFileSync(DATA_FILE, "utf8");
-
-    if (!raw) {
-      return {
-        guilds: {},
-        users: {}
-      };
-    }
+    if (!raw) return { guilds: {}, users: {} };
 
     const parsed = JSON.parse(raw);
 
-    if (!parsed.guilds) parsed.guilds = {};
-    if (!parsed.users) parsed.users = {};
-
-    return parsed;
-
+    return {
+      guilds: parsed.guilds || {},
+      users: parsed.users || {}
+    };
   } catch (e) {
     console.log("data.json corrupted, resetting...");
-
-    return {
-      guilds: {},
-      users: {}
-    };
+    return { guilds: {}, users: {} };
   }
 }
 
@@ -61,11 +45,15 @@ function saveData(data) {
 
 function getStreamers() {
   const data = loadData();
-
   return Object.entries(data.users).map(([discordId, twitch]) => ({
     discordId,
     twitch
   }));
+}
+
+function getGuildChannel(guildId) {
+  const data = loadData();
+  return data.guilds?.[guildId]?.channel || null;
 }
 
 // -------------------- TWITCH --------------------
@@ -107,92 +95,62 @@ async function checkStreamer(user_login) {
 // -------------------- MONITOR --------------------
 
 async function monitor() {
-
   const data = loadData();
-
   const guilds = data.guilds || {};
-
   const streamers = getStreamers();
 
-  for (const guildId of Object.keys(guilds)) {
-
-    const guildConfig = guilds[guildId];
+  for (const user of streamers) {
+    let stream;
 
     try {
+      stream = await checkStreamer(user.twitch);
+    } catch (e) {
+      continue;
+    }
 
-      const channel = await client.channels.fetch(guildConfig.promoChannel);
+    for (const guildId of Object.keys(guilds)) {
+      const guildConfig = guilds[guildId];
+      const channelId = guildConfig.channel;
 
-      if (!channel) continue;
+      if (!channelId) continue;
 
-      for (const user of streamers) {
+      try {
+        const channel = await client.channels.fetch(channelId);
+        if (!channel) continue;
 
-        try {
+        const liveKey = `${guildId}-${user.twitch}`;
 
-          const stream = await checkStreamer(user.twitch);
+        if (stream) {
+          if (!liveNow.has(liveKey)) {
+            liveNow.add(liveKey);
 
-          if (stream) {
+            const embed = new EmbedBuilder()
+              .setTitle(`${stream.user_name} is LIVE 🔴`)
+              .setURL(`https://twitch.tv/${user.twitch}`)
+              .setDescription(stream.title)
+              .addFields(
+                { name: "Game", value: stream.game_name || "Unknown", inline: true },
+                { name: "Viewers", value: String(stream.viewer_count), inline: true }
+              )
+              .setImage(
+                stream.thumbnail_url
+                  .replace("{width}", "1280")
+                  .replace("{height}", "720") +
+                `?t=${Date.now()}`
+              )
+              .setColor("Purple");
 
-            const liveKey = `${guildId}-${user.twitch}`;
-
-            if (!liveNow.has(liveKey)) {
-
-              liveNow.add(liveKey);
-
-              const embed = new EmbedBuilder()
-                .setTitle(`${stream.user_name} is LIVE 🔴`)
-                .setURL(`https://twitch.tv/${user.twitch}`)
-                .setDescription(stream.title)
-                .addFields(
-                  {
-                    name: "Game",
-                    value: stream.game_name || "Unknown",
-                    inline: true
-                  },
-                  {
-                    name: "Viewers",
-                    value: String(stream.viewer_count),
-                    inline: true
-                  }
-                )
-                .setImage(
-                  stream.thumbnail_url
-                    .replace("{width}", "1280")
-                    .replace("{height}", "720") +
-                  `?t=${Date.now()}`
-                )
-                .setColor("Purple");
-
-              const member = await channel.guild.members
-                .fetch(user.discordId)
-                .catch(() => null);
-
-              await channel.send({
-                content: member
-                  ? `🔴 ${member} is LIVE on Twitch!`
-                  : `🔴 **${stream.user_name}** is LIVE on Twitch!`,
-                embeds: [embed],
-              });
-
-              console.log(`LIVE POSTED ${user.twitch} in ${guildId}`);
-            }
-
-          } else {
-
-            liveNow.delete(`${guildId}-${user.twitch}`);
-
+            await channel.send({
+              content: `🔴 **${stream.user_name}** is LIVE!`,
+              embeds: [embed],
+            });
           }
-
-        } catch (err) {
-
-          console.log("Error checking", user.twitch, err.message);
-
+        } else {
+          liveNow.delete(liveKey);
         }
+      } catch (e) {
+        console.log("Guild error:", e.message);
       }
-
-    } catch (err) {
-
-      console.log("Guild monitor error:", guildId, err.message);
-
     }
   }
 }
@@ -202,29 +160,38 @@ async function monitor() {
 const commands = [
   new SlashCommandBuilder()
     .setName("setup")
-    .setDescription("Setup Twitch live alert channel")
+    .setDescription("Set Twitch alert channel")
     .addChannelOption(opt =>
       opt.setName("channel")
-        .setDescription("Channel for Twitch live alerts")
+        .setDescription("Channel for live alerts")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("channel")
+    .setDescription("Change alert channel")
+    .addChannelOption(opt =>
+      opt.setName("channel")
+        .setDescription("New alert channel")
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("link")
-    .setDescription("Link your Twitch account")
+    .setDescription("Link Twitch account")
     .addStringOption(opt =>
       opt.setName("username")
-        .setDescription("Your Twitch username")
+        .setDescription("Twitch username")
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("testlive")
-    .setDescription("Test live Twitch embed message"),
+    .setDescription("Test live alert"),
 
   new SlashCommandBuilder()
     .setName("postlive")
-    .setDescription("Manually post a Twitch live alert")
+    .setDescription("Manually post live alert")
     .addStringOption(opt =>
       opt.setName("username")
         .setDescription("Twitch username")
@@ -235,22 +202,12 @@ const commands = [
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 async function registerCommands() {
-  try {
+  await rest.put(
+    Routes.applicationCommands(process.env.CLIENT_ID),
+    { body: commands }
+  );
 
-    console.log("Registering global slash commands...");
-
-    await rest.put(
-      Routes.applicationCommands(process.env.CLIENT_ID),
-      { body: commands }
-    );
-
-    console.log("Global slash commands registered!");
-
-  } catch (err) {
-
-    console.error("Command register error:", err);
-
-  }
+  console.log("Slash commands registered");
 }
 
 // -------------------- EVENTS --------------------
@@ -261,140 +218,117 @@ client.once("ready", async () => {
   await getTwitchToken();
   await registerCommands();
 
-  setInterval(monitor, 60000);
+  setInterval(async () => {
+    try {
+      await monitor();
+    } catch (e) {
+      console.error("Monitor error:", e);
+    }
+  }, 60000);
 });
 
-// -------------------- INTERACTIONS --------------------
+// -------------------- COMMANDS --------------------
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  console.log("Slash command received:", interaction.commandName);
+  const data = loadData();
 
   // ---------------- SETUP ----------------
-
   if (interaction.commandName === "setup") {
+    if (!interaction.memberPermissions.has("Administrator")) {
+      return interaction.reply({ content: "Admin only.", ephemeral: true });
+    }
 
-  if (!interaction.memberPermissions.has("Administrator")) {
+    const channel = interaction.options.getChannel("channel");
+
+    data.guilds[interaction.guild.id] = {
+      channel: channel.id
+    };
+
+    saveData(data);
+
     return interaction.reply({
-      content: "❌ You must be an Administrator.",
+      content: `Setup complete → ${channel}`,
       ephemeral: true
     });
   }
 
-  const setupChannel = interaction.options.getChannel("channel");
+  // ---------------- CHANNEL CHANGE ----------------
+  if (interaction.commandName === "channel") {
+    const channel = interaction.options.getChannel("channel");
 
-  const data = loadData();
+    data.guilds[interaction.guild.id] = {
+      channel: channel.id
+    };
 
-  data.guilds[interaction.guild.id] = {
-    promoChannel: setupChannel.id
-  };
+    saveData(data);
 
-  saveData(data);
+    return interaction.reply({
+      content: `Channel updated → ${channel}`,
+      ephemeral: true
+    });
+  }
 
-  return interaction.reply({
-    content: `✅ Twitch alerts set to ${setupChannel}`,
-    ephemeral: true
-  });
-}
   // ---------------- LINK ----------------
   if (interaction.commandName === "link") {
-  const twitch = interaction.options.getString("username");
+    const twitch = interaction.options.getString("username");
 
-  const data = loadData();
+    data.users[interaction.user.id] = twitch;
+    saveData(data);
 
-  data.users[interaction.user.id] = twitch;
-
-  saveData(data);
-
-  return interaction.reply({
-    content: `✅ Linked successfully!\nDiscord: <@${interaction.user.id}>\nTwitch: **${twitch}**`,
-    ephemeral: false
-  });
-}
+    return interaction.reply({
+      content: `Linked to **${twitch}**`,
+      ephemeral: false
+    });
+  }
 
   // ---------------- TEST LIVE ----------------
   if (interaction.commandName === "testlive") {
-    const channel = await client.channels.fetch(process.env.PROMO_CHANNEL);
+    const channelId = getGuildChannel(interaction.guild.id);
 
-    const fakeStream = {
-      user_name: "TEST STREAMER",
-      title: "This is a test stream 🚀",
-      game_name: "Testing System",
-      viewer_count: 999,
-      thumbnail_url:
-        "https://static-cdn.jtvnw.net/previews-ttv/live_user_test-{width}x{height}"
-    };
-
-    const embed = new EmbedBuilder()
-      .setTitle(`${fakeStream.user_name} is LIVE 🔴`)
-      .setURL(`https://twitch.tv/test`)
-      .setDescription(fakeStream.title)
-      .addFields(
-        { name: "Game", value: fakeStream.game_name, inline: true },
-        { name: "Viewers", value: String(fakeStream.viewer_count), inline: true }
-      )
-      .setImage(
-        fakeStream.thumbnail_url
-          .replace("{width}", "1280")
-          .replace("{height}", "720")
-      )
-      .setColor("Purple");
-
-    await channel.send({
-      content: `🔴 <@${interaction.user.id}> triggered a LIVE TEST`,
-      embeds: [embed],
-    });
-
-    return interaction.reply({
-      content: "✅ Test live message sent!",
-      ephemeral: true
-    });
-  }
-
-  // ---------------- POST LIVE ----------------
-  if (interaction.commandName === "postlive") {
-    const twitchName = interaction.options.getString("username");
-
-    const stream = await checkStreamer(twitchName);
-
-    if (!stream) {
+    if (!channelId) {
       return interaction.reply({
-        content: `❌ ${twitchName} is NOT live right now.`,
+        content: "Run /setup first",
         ephemeral: true
       });
     }
 
-    const channel = await client.channels.fetch(process.env.PROMO_CHANNEL);
-
-    const embed = new EmbedBuilder()
-      .setTitle(`${stream.user_name} is LIVE 🔴`)
-      .setURL(`https://twitch.tv/${twitchName}`)
-      .setDescription(stream.title)
-      .addFields(
-        { name: "Game", value: stream.game_name || "Unknown", inline: true },
-        { name: "Viewers", value: String(stream.viewer_count), inline: true }
-      )
-      .setImage(
-        stream.thumbnail_url
-          .replace("{width}", "1280")
-          .replace("{height}", "720") +
-          `?t=${Date.now()}`
-      )
-      .setColor("Purple");
+    const channel = await client.channels.fetch(channelId);
 
     await channel.send({
-      content: `🔴 Manual alert triggered for **${twitchName}**`,
-      embeds: [embed],
+      content: `🔴 TEST ALERT from <@${interaction.user.id}>`
     });
 
-    return interaction.reply({
-      content: `✅ Posted live alert for **${twitchName}**`,
-      ephemeral: true
+    return interaction.reply({ content: "Sent test", ephemeral: true });
+  }
+
+  // ---------------- POST LIVE ----------------
+  if (interaction.commandName === "postlive") {
+    const twitch = interaction.options.getString("username");
+
+    const stream = await checkStreamer(twitch);
+
+    if (!stream) {
+      return interaction.reply({ content: "Not live", ephemeral: true });
+    }
+
+    const channelId = getGuildChannel(interaction.guild.id);
+
+    if (!channelId) {
+      return interaction.reply({ content: "Run /setup first", ephemeral: true });
+    }
+
+    const channel = await client.channels.fetch(channelId);
+
+    await channel.send({
+      content: `🔴 Manual: **${stream.user_name}** is LIVE!`
     });
+
+    return interaction.reply({ content: "Posted", ephemeral: true });
   }
 });
 
-// -------------------- LOGIN --------------------
+// ---------------- LOGIN ----------------
 
 client.login(process.env.DISCORD_TOKEN);
